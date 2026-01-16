@@ -42,6 +42,17 @@ public class InformationSchema {
   public static final String PIPE_PLUGINS = "pipe_plugins";
   public static final String TOPICS = "topics";
   public static final String SUBSCRIPTIONS = "subscriptions";
+  public static final String VIEWS = "views";
+  public static final String FUNCTIONS = "functions";
+  public static final String CONFIGURATIONS = "configurations";
+  public static final String KEYWORDS = "keywords";
+  public static final String NODES = "nodes";
+  public static final String CONFIG_NODES = "config_nodes";
+  public static final String DATA_NODES = "data_nodes";
+  public static final String CONNECTIONS = "connections";
+  public static final String CURRENT_QUERIES = "current_queries";
+  public static final String QUERIES_COSTS_HISTOGRAM = "queries_costs_histogram";
+  public static final String SERVICES = "services";
 
   static {
     final TsTable queriesTable = new TsTable(QUERIES);
@@ -49,17 +60,15 @@ public class InformationSchema {
         new TagColumnSchema(ColumnHeaderConstant.QUERY_ID_TABLE_MODEL, TSDataType.STRING));
     queriesTable.addColumnSchema(
         new AttributeColumnSchema(
-            ColumnHeaderConstant.QUERY_ID_START_TIME_TABLE_MODEL, TSDataType.TIMESTAMP));
+            ColumnHeaderConstant.START_TIME_TABLE_MODEL, TSDataType.TIMESTAMP));
     queriesTable.addColumnSchema(
         new AttributeColumnSchema(ColumnHeaderConstant.DATA_NODE_ID_TABLE_MODEL, TSDataType.INT32));
     queriesTable.addColumnSchema(
         new AttributeColumnSchema(ColumnHeaderConstant.ELAPSED_TIME_TABLE_MODEL, TSDataType.FLOAT));
     queriesTable.addColumnSchema(
-        new AttributeColumnSchema(
-            ColumnHeaderConstant.STATEMENT.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+        new AttributeColumnSchema(ColumnHeaderConstant.STATEMENT_TABLE_MODEL, TSDataType.STRING));
     queriesTable.addColumnSchema(
-        new AttributeColumnSchema(
-            ColumnHeaderConstant.USER.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+        new AttributeColumnSchema(ColumnHeaderConstant.USER_TABLE_MODEL, TSDataType.STRING));
     queriesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
     schemaTables.put(QUERIES, queriesTable);
 
@@ -103,6 +112,8 @@ public class InformationSchema {
     tableTable.addColumnSchema(
         new AttributeColumnSchema(
             ColumnHeaderConstant.COMMENT.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    tableTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.TABLE_TYPE_TABLE_MODEL, TSDataType.STRING));
     tableTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
     schemaTables.put(TABLES, tableTable);
 
@@ -165,6 +176,9 @@ public class InformationSchema {
     regionTable.addColumnSchema(
         new AttributeColumnSchema(
             ColumnHeaderConstant.TS_FILE_SIZE_BYTES_TABLE_MODEL, TSDataType.INT64));
+    regionTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.COMPRESSION_RATIO_TABLE_MODEL, TSDataType.DOUBLE));
     regionTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
     schemaTables.put(REGIONS, regionTable);
 
@@ -229,6 +243,168 @@ public class InformationSchema {
             ColumnHeaderConstant.SUBSCRIBED_CONSUMERS_TABLE_MODEL, TSDataType.STRING));
     subscriptionTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
     schemaTables.put(SUBSCRIPTIONS, subscriptionTable);
+
+    final TsTable viewTable = new TsTable(VIEWS);
+    viewTable.addColumnSchema(
+        new TagColumnSchema(
+            ColumnHeaderConstant.DATABASE.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    viewTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.TABLE_NAME_TABLE_MODEL, TSDataType.STRING));
+    viewTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.VIEW_DEFINITION_TABLE_MODEL, TSDataType.STRING));
+    viewTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(VIEWS, viewTable);
+
+    final TsTable functionTable = new TsTable(FUNCTIONS);
+    functionTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.FUNCTION_NAME_TABLE_MODEL, TSDataType.STRING));
+    functionTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.FUNCTION_TYPE_TABLE_MODEL, TSDataType.STRING));
+    functionTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.CLASS_NAME_UDF_TABLE_MODEL, TSDataType.STRING));
+    functionTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.STATE.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    functionTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(FUNCTIONS, functionTable);
+
+    final TsTable configurationsTable = new TsTable(CONFIGURATIONS);
+    configurationsTable.addColumnSchema(
+        new TagColumnSchema(
+            ColumnHeaderConstant.VARIABLE.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    configurationsTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.VALUE.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    configurationsTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(CONFIGURATIONS, configurationsTable);
+
+    final TsTable keywordsTable = new TsTable(KEYWORDS);
+    keywordsTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.WORD, TSDataType.STRING));
+    keywordsTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.RESERVED, TSDataType.INT32));
+    keywordsTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(KEYWORDS, keywordsTable);
+
+    final TsTable nodesTable = new TsTable(NODES);
+    nodesTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.NODE_ID_TABLE_MODEL, TSDataType.INT32));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.NODE_TYPE_TABLE_MODEL, TSDataType.STRING));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.STATUS.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.INTERNAL_ADDRESS_TABLE_MODEL, TSDataType.STRING));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.INTERNAL_PORT_TABLE_MODEL, TSDataType.INT32));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.VERSION.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    nodesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.BUILD_INFO_TABLE_MODEL, TSDataType.STRING));
+    nodesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(NODES, nodesTable);
+
+    final TsTable configNodesTable = new TsTable(CONFIG_NODES);
+    configNodesTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.NODE_ID_TABLE_MODEL, TSDataType.INT32));
+    configNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.CONFIG_CONSENSUS_PORT_TABLE_MODEL, TSDataType.INT32));
+    configNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.ROLE.toLowerCase(Locale.ENGLISH), TSDataType.STRING));
+    configNodesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(CONFIG_NODES, configNodesTable);
+
+    final TsTable dataNodesTable = new TsTable(DATA_NODES);
+    dataNodesTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.NODE_ID_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.DATA_REGION_NUM_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.SCHEMA_REGION_NUM_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.RPC_ADDRESS_TABLE_MODEL, TSDataType.STRING));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.RPC_PORT_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.MPP_PORT_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.DATA_CONSENSUS_PORT_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.SCHEMA_CONSENSUS_PORT_TABLE_MODEL, TSDataType.INT32));
+    dataNodesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(DATA_NODES, dataNodesTable);
+
+    final TsTable connectionsTable = new TsTable(CONNECTIONS);
+    connectionsTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.DATANODE_ID, TSDataType.STRING));
+    connectionsTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.USERID, TSDataType.STRING));
+    connectionsTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.SESSION_ID, TSDataType.STRING));
+    connectionsTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.USER_NAME, TSDataType.STRING));
+    connectionsTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.LAST_ACTIVE_TIME, TSDataType.TIMESTAMP));
+    connectionsTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.CLIENT_IP, TSDataType.STRING));
+    connectionsTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(CONNECTIONS, connectionsTable);
+
+    final TsTable currentQueriesTable = new TsTable(CURRENT_QUERIES);
+    currentQueriesTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.QUERY_ID_TABLE_MODEL, TSDataType.STRING));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.STATE_TABLE_MODEL, TSDataType.STRING));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(
+            ColumnHeaderConstant.START_TIME_TABLE_MODEL, TSDataType.TIMESTAMP));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.END_TIME_TABLE_MODEL, TSDataType.TIMESTAMP));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.DATA_NODE_ID_TABLE_MODEL, TSDataType.INT32));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.COST_TIME, TSDataType.FLOAT));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.STATEMENT_TABLE_MODEL, TSDataType.STRING));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.USER_TABLE_MODEL, TSDataType.STRING));
+    currentQueriesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.CLIENT_IP, TSDataType.STRING));
+    currentQueriesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(CURRENT_QUERIES, currentQueriesTable);
+
+    final TsTable queriesCostsHistogramTable = new TsTable(QUERIES_COSTS_HISTOGRAM);
+    queriesCostsHistogramTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.BIN, TSDataType.STRING));
+    queriesCostsHistogramTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.NUMS, TSDataType.INT32));
+    queriesCostsHistogramTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.DATANODE_ID, TSDataType.INT32));
+    queriesCostsHistogramTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(QUERIES_COSTS_HISTOGRAM, queriesCostsHistogramTable);
+
+    final TsTable servicesTable = new TsTable(SERVICES);
+    servicesTable.addColumnSchema(
+        new TagColumnSchema(ColumnHeaderConstant.SERVICE_NAME_TABLE_MODEL, TSDataType.STRING));
+    servicesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.DATA_NODE_ID_TABLE_MODEL, TSDataType.INT32));
+    servicesTable.addColumnSchema(
+        new AttributeColumnSchema(ColumnHeaderConstant.STATE_TABLE_MODEL, TSDataType.STRING));
+    servicesTable.removeColumnSchema(TsTable.TIME_COLUMN_NAME);
+    schemaTables.put(SERVICES, servicesTable);
   }
 
   public static Map<String, TsTable> getSchemaTables() {

@@ -23,13 +23,12 @@ import org.apache.iotdb.common.rpc.thrift.TAINodeLocation;
 import org.apache.iotdb.common.rpc.thrift.TSStatus;
 import org.apache.iotdb.commons.utils.ThriftCommonsSerDeUtils;
 import org.apache.iotdb.confignode.consensus.request.write.ainode.RemoveAINodePlan;
-import org.apache.iotdb.confignode.consensus.request.write.model.DropModelInNodePlan;
 import org.apache.iotdb.confignode.procedure.env.ConfigNodeProcedureEnv;
 import org.apache.iotdb.confignode.procedure.exception.ProcedureException;
-import org.apache.iotdb.confignode.procedure.exception.ProcedureSuspendedException;
-import org.apache.iotdb.confignode.procedure.exception.ProcedureYieldException;
 import org.apache.iotdb.confignode.procedure.state.RemoveAINodeState;
 import org.apache.iotdb.confignode.procedure.store.ProcedureType;
+import org.apache.iotdb.db.protocol.client.an.AINodeClient;
+import org.apache.iotdb.db.protocol.client.an.AINodeClientManager;
 import org.apache.iotdb.rpc.TSStatusCode;
 
 import org.slf4j.Logger;
@@ -58,18 +57,34 @@ public class RemoveAINodeProcedure extends AbstractNodeProcedure<RemoveAINodeSta
 
   @Override
   protected Flow executeFromState(ConfigNodeProcedureEnv env, RemoveAINodeState state)
-      throws ProcedureSuspendedException, ProcedureYieldException, InterruptedException {
+      throws InterruptedException {
     if (removedAINode == null) {
       return Flow.NO_MORE_STATE;
     }
 
     try {
       switch (state) {
-        case MODEL_DELETE:
-          env.getConfigManager()
-              .getConsensusManager()
-              .write(new DropModelInNodePlan(removedAINode.aiNodeId));
-          // Cause the AINode is removed, so we don't need to remove the model file.
+        case NODE_STOP:
+          TSStatus resp = null;
+          try (AINodeClient client =
+              AINodeClientManager.getInstance()
+                  .borrowClient(AINodeClientManager.AINODE_ID_PLACEHOLDER)) {
+            resp = client.stopAINode();
+          } catch (Exception e) {
+            LOGGER.warn(
+                "Failed to stop AINode {}, but the remove process will continue.",
+                removedAINode.getInternalEndPoint());
+          }
+          if (resp != null && resp.getCode() == TSStatusCode.SUCCESS_STATUS.getStatusCode()) {
+            LOGGER.info("Successfully stopped AINode {}", removedAINode.getInternalEndPoint());
+          } else {
+            if (resp != null) {
+              LOGGER.warn(
+                  "Failed to stop AINode {} because {}, but the remove process will continue.",
+                  resp.getMessage(),
+                  removedAINode.getInternalEndPoint());
+            }
+          }
           setNextState(RemoveAINodeState.NODE_REMOVE);
           break;
         case NODE_REMOVE:
@@ -126,7 +141,7 @@ public class RemoveAINodeProcedure extends AbstractNodeProcedure<RemoveAINodeSta
 
   @Override
   protected RemoveAINodeState getInitialState() {
-    return RemoveAINodeState.MODEL_DELETE;
+    return RemoveAINodeState.NODE_STOP;
   }
 
   @Override

@@ -100,13 +100,15 @@ public class RegionReadExecutor {
                 });
         return resp;
       }
-    } catch (ConsensusGroupNotExistException e) {
+    } catch (final ConsensusGroupNotExistException e) {
       LOGGER.warn("Execute FragmentInstance in ConsensusGroup {} failed.", groupId, e);
-      RegionExecutionResult resp =
+      final String errorMsg = String.format(ERROR_MSG_FORMAT, e.getMessage());
+      final RegionExecutionResult resp =
           RegionExecutionResult.create(
               false,
-              String.format(ERROR_MSG_FORMAT, e.getMessage()),
-              new TSStatus(TSStatusCode.CONSENSUS_GROUP_NOT_EXIST.getStatusCode()));
+              errorMsg,
+              new TSStatus(TSStatusCode.CONSENSUS_GROUP_NOT_EXIST.getStatusCode())
+                  .setMessage(errorMsg));
       resp.setReadNeedRetry(true);
       return resp;
     } catch (Throwable e) {
@@ -135,9 +137,22 @@ public class RegionReadExecutor {
       FragmentInstanceInfo info =
           fragmentInstanceManager.execDataQueryFragmentInstance(
               fragmentInstance, VirtualDataRegion.getInstance());
-      return RegionExecutionResult.create(!info.getState().isFailed(), info.getMessage(), null);
+      if (info == null) {
+        LOGGER.error(RESPONSE_NULL_ERROR_MSG);
+        return RegionExecutionResult.create(false, RESPONSE_NULL_ERROR_MSG, null);
+      } else {
+        RegionExecutionResult resp =
+            RegionExecutionResult.create(!info.getState().isFailed(), info.getMessage(), null);
+        info.getErrorCode()
+            .ifPresent(
+                s -> {
+                  resp.setStatus(s);
+                  resp.setReadNeedRetry(StatusUtils.needRetryHelper(s));
+                });
+        return resp;
+      }
     } catch (Throwable t) {
-      LOGGER.error("Execute FragmentInstance in QueryExecutor failed.", t);
+      LOGGER.warn("Execute FragmentInstance in QueryExecutor failed.", t);
       return RegionExecutionResult.create(
           false, String.format(ERROR_MSG_FORMAT, t.getMessage()), null);
     }

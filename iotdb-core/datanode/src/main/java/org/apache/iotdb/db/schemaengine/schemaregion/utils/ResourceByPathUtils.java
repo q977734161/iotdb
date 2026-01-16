@@ -22,6 +22,7 @@ package org.apache.iotdb.db.schemaengine.schemaregion.utils;
 import org.apache.iotdb.commons.path.AlignedFullPath;
 import org.apache.iotdb.commons.path.IFullPath;
 import org.apache.iotdb.commons.path.NonAlignedFullPath;
+import org.apache.iotdb.db.conf.IoTDBDescriptor;
 import org.apache.iotdb.db.exception.query.QueryProcessException;
 import org.apache.iotdb.db.queryengine.execution.fragment.FragmentInstanceContext;
 import org.apache.iotdb.db.queryengine.execution.fragment.QueryContext;
@@ -36,6 +37,7 @@ import org.apache.iotdb.db.storageengine.dataregion.memtable.ReadOnlyMemChunk;
 import org.apache.iotdb.db.storageengine.dataregion.modification.ModEntry;
 import org.apache.iotdb.db.storageengine.dataregion.tsfile.TsFileResource;
 import org.apache.iotdb.db.utils.ModificationUtils;
+import org.apache.iotdb.db.utils.SchemaUtils;
 import org.apache.iotdb.db.utils.datastructure.TVList;
 
 import org.apache.tsfile.enums.TSDataType;
@@ -89,7 +91,9 @@ public abstract class ResourceByPathUtils {
   }
 
   public abstract ITimeSeriesMetadata generateTimeSeriesMetadata(
-      List<ReadOnlyMemChunk> readOnlyMemChunk, List<IChunkMetadata> chunkMetadataList)
+      List<ReadOnlyMemChunk> readOnlyMemChunk,
+      List<IChunkMetadata> chunkMetadataList,
+      Filter globalTimeFilter)
       throws IOException;
 
   public abstract ReadOnlyMemChunk getReadOnlyMemChunkFromMemTable(
@@ -150,6 +154,7 @@ public abstract class ResourceByPathUtils {
     // mutable tvlist
     TVList list = memChunk.getWorkingTVList();
     TVList cloneList = null;
+    long tvListRamSize = list.calculateRamSize();
     list.lockQueryList();
     try {
       if (copyTimeFilter != null
@@ -190,7 +195,8 @@ public abstract class ResourceByPathUtils {
           if (firstQuery instanceof FragmentInstanceContext) {
             MemoryReservationManager memoryReservationManager =
                 ((FragmentInstanceContext) firstQuery).getMemoryReservationContext();
-            memoryReservationManager.reserveMemoryCumulatively(list.calculateRamSize());
+            memoryReservationManager.reserveMemoryCumulatively(tvListRamSize);
+            list.setReservedMemoryBytes(tvListRamSize);
           }
           list.setOwnerQuery(firstQuery);
 
@@ -224,12 +230,19 @@ class AlignedResourceByPathUtils extends ResourceByPathUtils {
    */
   @Override
   public AbstractAlignedTimeSeriesMetadata generateTimeSeriesMetadata(
-      List<ReadOnlyMemChunk> readOnlyMemChunk, List<IChunkMetadata> chunkMetadataList) {
+      List<ReadOnlyMemChunk> readOnlyMemChunk,
+      List<IChunkMetadata> chunkMetadataList,
+      Filter globalTimeFilter) {
     TimeseriesMetadata timeTimeSeriesMetadata = new TimeseriesMetadata();
     timeTimeSeriesMetadata.setDataSizeOfChunkMetaDataList(-1);
     timeTimeSeriesMetadata.setMeasurementId("");
     timeTimeSeriesMetadata.setTsDataType(TSDataType.VECTOR);
 
+    boolean useFakeStatistics =
+        !readOnlyMemChunk.isEmpty()
+            && IoTDBDescriptor.getInstance().getConfig().isStreamingQueryMemChunk();
+    long startTime = Long.MAX_VALUE;
+    long endTime = Long.MIN_VALUE;
     Statistics<? extends Serializable> timeStatistics =
         Statistics.getStatsByType(timeTimeSeriesMetadata.getTsDataType());
 
@@ -247,34 +260,26 @@ class AlignedResourceByPathUtils extends ResourceByPathUtils {
     boolean[] exist = new boolean[alignedFullPath.getSchemaList().size()];
     boolean modified = false;
     boolean isTable = false;
+    int index = 0;
     for (IChunkMetadata chunkMetadata : chunkMetadataList) {
       AbstractAlignedChunkMetadata alignedChunkMetadata =
           (AbstractAlignedChunkMetadata) chunkMetadata;
       isTable = isTable || (alignedChunkMetadata instanceof TableDeviceChunkMetadata);
       modified = (modified || alignedChunkMetadata.isModified());
-      timeStatistics.mergeStatistics(alignedChunkMetadata.getTimeChunkMetadata().getStatistics());
-      for (int i = 0; i < valueTimeSeriesMetadataList.size(); i++) {
-        if (alignedChunkMetadata.getValueChunkMetadataList().get(i) != null) {
-          exist[i] = true;
-          valueTimeSeriesMetadataList
-              .get(i)
-              .getStatistics()
-              .mergeStatistics(
-                  alignedChunkMetadata.getValueChunkMetadataList().get(i).getStatistics());
-        }
+      TSDataType targetDataType = alignedFullPath.getSchemaList().get(index).getType();
+      if ((alignedChunkMetadata.getValueChunkMetadataList().get(index) != null)
+          && (alignedChunkMetadata.getValueChunkMetadataList().get(index).getDataType()
+              != targetDataType)) {
+        // create new statistics object via new data type, and merge statistics information
+        SchemaUtils.rewriteAlignedChunkMetadataStatistics(
+            alignedChunkMetadata, index, targetDataType);
+        alignedChunkMetadata.setModified(true);
       }
-    }
-
-    for (ReadOnlyMemChunk memChunk : readOnlyMemChunk) {
-      if (!memChunk.isEmpty()) {
-        memChunk.sortTvLists();
-        memChunk.initChunkMetaFromTvLists();
-        AbstractAlignedChunkMetadata alignedChunkMetadata =
-            (AbstractAlignedChunkMetadata) memChunk.getChunkMetaData();
-        isTable = isTable || (alignedChunkMetadata instanceof TableDeviceChunkMetadata);
+      if (!useFakeStatistics) {
         timeStatistics.mergeStatistics(alignedChunkMetadata.getTimeChunkMetadata().getStatistics());
         for (int i = 0; i < valueTimeSeriesMetadataList.size(); i++) {
-          if (alignedChunkMetadata.getValueChunkMetadataList().get(i) != null) {
+          if (!alignedChunkMetadata.getValueChunkMetadataList().isEmpty()
+              && alignedChunkMetadata.getValueChunkMetadataList().get(i) != null) {
             exist[i] = true;
             valueTimeSeriesMetadataList
                 .get(i)
@@ -283,14 +288,60 @@ class AlignedResourceByPathUtils extends ResourceByPathUtils {
                     alignedChunkMetadata.getValueChunkMetadataList().get(i).getStatistics());
           }
         }
+        index++;
+        continue;
+      }
+      startTime = Math.min(startTime, chunkMetadata.getStartTime());
+      endTime = Math.max(endTime, chunkMetadata.getEndTime());
+      index++;
+    }
+
+    for (ReadOnlyMemChunk memChunk : readOnlyMemChunk) {
+      if (!memChunk.isEmpty()) {
+        memChunk.sortTvLists();
+        if (useFakeStatistics) {
+          memChunk.initChunkMetaFromTVListsWithFakeStatistics();
+          startTime = Math.min(startTime, memChunk.getChunkMetaData().getStartTime());
+          endTime = Math.max(endTime, memChunk.getChunkMetaData().getEndTime());
+        } else {
+          memChunk.initChunkMetaFromTvLists(globalTimeFilter);
+        }
+        AbstractAlignedChunkMetadata alignedChunkMetadata =
+            (AbstractAlignedChunkMetadata) memChunk.getChunkMetaData();
+        isTable = isTable || (alignedChunkMetadata instanceof TableDeviceChunkMetadata);
+        if (!useFakeStatistics) {
+          timeStatistics.mergeStatistics(
+              alignedChunkMetadata.getTimeChunkMetadata().getStatistics());
+          for (int i = 0; i < valueTimeSeriesMetadataList.size(); i++) {
+            if (alignedChunkMetadata.getValueChunkMetadataList().get(i) != null) {
+              exist[i] = true;
+              valueTimeSeriesMetadataList
+                  .get(i)
+                  .getStatistics()
+                  .mergeStatistics(
+                      alignedChunkMetadata.getValueChunkMetadataList().get(i).getStatistics());
+            }
+          }
+        }
       }
     }
 
     timeTimeSeriesMetadata.setStatistics(timeStatistics);
-    timeTimeSeriesMetadata.setModified(modified);
+    if (useFakeStatistics) {
+      timeStatistics.setStartTime(startTime);
+      timeStatistics.setEndTime(endTime);
+      timeStatistics.setCount(1);
+    }
+    timeTimeSeriesMetadata.setModified(useFakeStatistics || modified);
 
     for (int i = 0; i < valueTimeSeriesMetadataList.size(); i++) {
-      if (!exist[i]) {
+      if (useFakeStatistics) {
+        TimeseriesMetadata valueTimeseriesMetadata = valueTimeSeriesMetadataList.get(i);
+        valueTimeseriesMetadata.getStatistics().setStartTime(startTime);
+        valueTimeseriesMetadata.getStatistics().setEndTime(endTime);
+        valueTimeseriesMetadata.getStatistics().setCount(1);
+        valueTimeseriesMetadata.setModified(useFakeStatistics || modified);
+      } else if (!exist[i]) {
         valueTimeSeriesMetadataList.set(i, null);
       }
     }
@@ -337,6 +388,7 @@ class AlignedResourceByPathUtils extends ResourceByPathUtils {
             context, alignedMemChunk, modsToMemtable == null, globalTimeFilter);
 
     // column index list for the query
+    // Columns with inconsistent types will be ignored and set -1
     List<Integer> columnIndexList =
         alignedMemChunk.buildColumnIndexList(alignedFullPath.getSchemaList());
 
@@ -470,30 +522,62 @@ class MeasurementResourceByPathUtils extends ResourceByPathUtils {
    */
   @Override
   public ITimeSeriesMetadata generateTimeSeriesMetadata(
-      List<ReadOnlyMemChunk> readOnlyMemChunk, List<IChunkMetadata> chunkMetadataList) {
+      List<ReadOnlyMemChunk> readOnlyMemChunk,
+      List<IChunkMetadata> chunkMetadataList,
+      Filter globalTimeFilter) {
+    boolean useFakeStatistics =
+        !readOnlyMemChunk.isEmpty()
+            && IoTDBDescriptor.getInstance().getConfig().isStreamingQueryMemChunk();
     TimeseriesMetadata timeSeriesMetadata = new TimeseriesMetadata();
     timeSeriesMetadata.setMeasurementId(fullPath.getMeasurementSchema().getMeasurementName());
     timeSeriesMetadata.setTsDataType(fullPath.getMeasurementSchema().getType());
     timeSeriesMetadata.setDataSizeOfChunkMetaDataList(-1);
 
+    long startTime = Long.MAX_VALUE;
+    long endTime = Long.MIN_VALUE;
     Statistics<? extends Serializable> seriesStatistics =
         Statistics.getStatsByType(timeSeriesMetadata.getTsDataType());
     // flush chunkMetadataList one by one
     boolean isModified = false;
-    for (IChunkMetadata chunkMetadata : chunkMetadataList) {
+    for (int index = 0; index < chunkMetadataList.size(); index++) {
+      IChunkMetadata chunkMetadata = chunkMetadataList.get(index);
       isModified = (isModified || chunkMetadata.isModified());
-      seriesStatistics.mergeStatistics(chunkMetadata.getStatistics());
+      TSDataType targetDataType = fullPath.getMeasurementSchema().getType();
+      if (chunkMetadata != null && (chunkMetadata.getDataType() != targetDataType)) {
+        // create new statistics object via new data type, and merge statistics information
+        SchemaUtils.rewriteNonAlignedChunkMetadataStatistics(
+            chunkMetadataList, index, targetDataType);
+        chunkMetadata.setModified(true);
+      }
+      if (!useFakeStatistics) {
+        if (chunkMetadata != null && targetDataType.isCompatible(chunkMetadata.getDataType())) {
+          seriesStatistics.mergeStatistics(chunkMetadata.getStatistics());
+        }
+        continue;
+      }
+      startTime = Math.min(startTime, chunkMetadata.getStartTime());
+      endTime = Math.max(endTime, chunkMetadata.getEndTime());
     }
 
     for (ReadOnlyMemChunk memChunk : readOnlyMemChunk) {
       if (!memChunk.isEmpty()) {
         memChunk.sortTvLists();
-        memChunk.initChunkMetaFromTvLists();
-        seriesStatistics.mergeStatistics(memChunk.getChunkMetaData().getStatistics());
+        if (useFakeStatistics) {
+          memChunk.initChunkMetaFromTVListsWithFakeStatistics();
+          startTime = Math.min(startTime, memChunk.getChunkMetaData().getStartTime());
+          endTime = Math.max(endTime, memChunk.getChunkMetaData().getEndTime());
+        } else {
+          memChunk.initChunkMetaFromTvLists(globalTimeFilter);
+          seriesStatistics.mergeStatistics(memChunk.getChunkMetaData().getStatistics());
+        }
       }
     }
+    if (useFakeStatistics) {
+      seriesStatistics.setStartTime(startTime);
+      seriesStatistics.setEndTime(endTime);
+    }
     timeSeriesMetadata.setStatistics(seriesStatistics);
-    timeSeriesMetadata.setModified(isModified);
+    timeSeriesMetadata.setModified(useFakeStatistics || isModified);
     return timeSeriesMetadata;
   }
 
@@ -514,6 +598,14 @@ class MeasurementResourceByPathUtils extends ResourceByPathUtils {
     }
     IWritableMemChunk memChunk =
         memTableMap.get(deviceID).getMemChunkMap().get(fullPath.getMeasurement());
+    // check If data type matches
+    if (memChunk.getSchema().getType() != fullPath.getMeasurementSchema().getType()
+        && !fullPath
+            .getMeasurementSchema()
+            .getType()
+            .isCompatible(memChunk.getSchema().getType())) {
+      return null;
+    }
     // prepare TVList for query. It should clone TVList if necessary.
     Map<TVList, Integer> tvListQueryMap =
         prepareTvListMapForQuery(context, memChunk, modsToMemtable == null, globalTimeFilter);

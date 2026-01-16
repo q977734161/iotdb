@@ -26,6 +26,7 @@ import org.apache.iotdb.commons.path.PathPatternTree;
 import org.apache.iotdb.commons.schema.filter.SchemaFilter;
 import org.apache.iotdb.commons.schema.filter.SchemaFilterFactory;
 import org.apache.iotdb.commons.schema.filter.impl.DeviceFilterUtil;
+import org.apache.iotdb.commons.schema.template.Template;
 import org.apache.iotdb.db.queryengine.plan.planner.plan.node.PlanNodeId;
 import org.apache.iotdb.db.queryengine.plan.relational.planner.node.schema.CreateOrUpdateTableDeviceNode;
 import org.apache.iotdb.db.schemaengine.schemaregion.ISchemaRegion;
@@ -36,7 +37,6 @@ import org.apache.iotdb.db.schemaengine.schemaregion.read.resp.info.ITimeSeriesS
 import org.apache.iotdb.db.schemaengine.schemaregion.read.resp.info.impl.ShowTimeSeriesResult;
 import org.apache.iotdb.db.schemaengine.schemaregion.read.resp.reader.ISchemaReader;
 import org.apache.iotdb.db.schemaengine.schemaregion.write.req.SchemaRegionWritePlanFactory;
-import org.apache.iotdb.db.schemaengine.template.Template;
 
 import org.apache.tsfile.enums.TSDataType;
 import org.apache.tsfile.file.metadata.enums.CompressionType;
@@ -56,6 +56,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.iotdb.commons.conf.IoTDBConstant.ONE_LEVEL_PATH_WILDCARD;
+import static org.apache.iotdb.commons.conf.IoTDBConstant.PATH_ROOT;
 import static org.apache.iotdb.commons.schema.SchemaConstant.ALL_MATCH_SCOPE;
 
 public class SchemaRegionTestUtil {
@@ -454,10 +455,10 @@ public class SchemaRegionTestUtil {
       final List<SchemaFilter> idDeterminedFilterList) {
     final List<PartialPath> patternList =
         DeviceFilterUtil.convertToDevicePattern(
-            schemaRegion.getDatabaseFullPath(),
-            table,
+            new String[] {PATH_ROOT, schemaRegion.getDatabaseFullPath(), table},
             idColumnNum,
-            Collections.singletonList(idDeterminedFilterList));
+            Collections.singletonList(idDeterminedFilterList),
+            false);
     final List<IDeviceSchemaInfo> result = new ArrayList<>();
     for (final PartialPath pattern : patternList) {
       try (final ISchemaReader<IDeviceSchemaInfo> reader =

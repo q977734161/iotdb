@@ -184,12 +184,18 @@ public class PageCacheDeletionBuffer implements DeletionBuffer {
     pendingDeletionsInOneTask.forEach(DeletionResource::onPersistSucceed);
   }
 
-  private void closeCurrentLoggingFile() throws IOException {
+  private void closeCurrentLoggingFile(boolean notifySuccess) throws IOException {
     LOGGER.info("Deletion persist-{}: current file has been closed", dataRegionId);
     // Close old resource to fsync.
-    this.logStream.close();
-    this.logChannel.close();
-    pendingDeletionsInOneTask.forEach(DeletionResource::onPersistSucceed);
+    if (this.logStream != null) {
+      this.logStream.close();
+    }
+    if (this.logChannel != null) {
+      this.logChannel.close();
+    }
+    if (notifySuccess) {
+      pendingDeletionsInOneTask.forEach(DeletionResource::onPersistSucceed);
+    }
   }
 
   private void resetTaskAttribute() {
@@ -261,10 +267,25 @@ public class PageCacheDeletionBuffer implements DeletionBuffer {
     // first waiting serialize and sync tasks finished, then release all resources
     waitUntilFlushAllDeletionsOrTimeOut();
     if (persistThread != null) {
-      persistThread.shutdown();
+      persistThread.shutdownNow();
+      try {
+        if (!persistThread.awaitTermination(30, TimeUnit.SECONDS)) {
+          LOGGER.warn("persistThread did not terminate within {}s", 30);
+        }
+      } catch (InterruptedException e) {
+        LOGGER.warn("DAL Thread {} still doesn't exit after 30s", dataRegionId);
+        Thread.currentThread().interrupt();
+      }
+    }
+    // close file handler
+    try {
+      closeCurrentLoggingFile(false);
+    } catch (IOException e) {
+      LOGGER.error("Fail to close current logging file when closing", e);
     }
     // clean buffer
     MmapUtil.clean(serializeBuffer);
+    serializeBuffer = null;
   }
 
   private void waitUntilFlushAllDeletionsOrTimeOut() {
@@ -330,6 +351,7 @@ public class PageCacheDeletionBuffer implements DeletionBuffer {
         LOGGER.warn(
             "Interrupted when waiting for taking DeletionResource from blocking queue to serialize.");
         Thread.currentThread().interrupt();
+        return;
       }
 
       // For further deletion, we use non-blocking poll() method to persist existing deletion of
@@ -360,7 +382,7 @@ public class PageCacheDeletionBuffer implements DeletionBuffer {
           deletionResources.add(deletionResource);
           // 2. fsync immediately and roll to a new file.
           appendCurrentBatch();
-          closeCurrentLoggingFile();
+          closeCurrentLoggingFile(true);
           resetTaskAttribute();
           switchLoggingFile();
           return;
@@ -374,7 +396,7 @@ public class PageCacheDeletionBuffer implements DeletionBuffer {
       // Persist deletions; Defensive programming here, just in case.
       if (totalSize.get() > 0) {
         appendCurrentBatch();
-        closeCurrentLoggingFile();
+        closeCurrentLoggingFile(true);
         resetTaskAttribute();
         switchLoggingFile();
       }

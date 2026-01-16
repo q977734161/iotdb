@@ -105,6 +105,7 @@ public class MemPageReader implements IPageReader {
           case TEXT:
           case STRING:
           case BLOB:
+          case OBJECT:
             batchData.putBinary(
                 tsBlock.getTimeColumn().getLong(i), tsBlock.getColumn(0).getBinary(i));
             break;
@@ -226,6 +227,9 @@ public class MemPageReader implements IPageReader {
   }
 
   @Override
+  public void setModified(boolean modified) {}
+
+  @Override
   public void initTsBlockBuilder(List<TSDataType> dataTypes) {
     // non-aligned page reader don't need to init TsBlockBuilder at the very beginning
   }
@@ -266,6 +270,7 @@ public class MemPageReader implements IPageReader {
         case TEXT:
         case BLOB:
         case STRING:
+        case OBJECT:
           for (int i = 0; i < tsBlock.getPositionCount(); i++) {
             statistics.update(tsBlock.getTimeByIndex(i), tsBlock.getColumn(0).getBinary(i));
           }

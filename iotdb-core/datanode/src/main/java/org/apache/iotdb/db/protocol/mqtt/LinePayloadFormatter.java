@@ -20,6 +20,7 @@ package org.apache.iotdb.db.protocol.mqtt;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.tsfile.enums.TSDataType;
+import org.apache.tsfile.external.commons.lang3.NotImplementedException;
 import org.apache.tsfile.utils.Binary;
 import org.apache.tsfile.utils.Pair;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * The Line payload formatter. myTable,tag1=value1,tag2=value2 attr1=value1,attr2=value2
@@ -63,7 +65,7 @@ public class LinePayloadFormatter implements PayloadFormatter {
   }
 
   @Override
-  public List<Message> format(ByteBuf payload) {
+  public List<Message> format(String topic, ByteBuf payload) {
     List<Message> messages = new ArrayList<>();
     if (payload == null) {
       return messages;
@@ -71,6 +73,8 @@ public class LinePayloadFormatter implements PayloadFormatter {
 
     String txt = payload.toString(StandardCharsets.UTF_8);
     String[] lines = txt.split(LINE_BREAK);
+    // '/' previously defined as a database name
+    String database = !topic.contains("/") ? topic : topic.substring(0, topic.indexOf("/"));
     for (String line : lines) {
       if (line.trim().startsWith(WELL)) {
         continue;
@@ -82,6 +86,9 @@ public class LinePayloadFormatter implements PayloadFormatter {
           log.warn("Invalid line protocol format ,line is {}", line);
           continue;
         }
+
+        // Parsing Database Name
+        message.setDatabase((database));
 
         // Parsing Table Names
         message.setTable(matcher.group(TABLE));
@@ -119,6 +126,12 @@ public class LinePayloadFormatter implements PayloadFormatter {
       }
     }
     return messages;
+  }
+
+  @Override
+  @Deprecated
+  public List<Message> format(ByteBuf payload) {
+    throw new NotImplementedException();
   }
 
   private boolean setTags(Matcher matcher, TableMessage message) {
@@ -178,7 +191,7 @@ public class LinePayloadFormatter implements PayloadFormatter {
     List<Object> values = new ArrayList<>();
     String fieldsGroup = matcher.group(FIELDS);
     if (fieldsGroup != null && !fieldsGroup.isEmpty()) {
-      String[] fieldPairs = fieldsGroup.split(COMMA);
+      String[] fieldPairs = splitFieldPairs(fieldsGroup);
       for (String fieldPair : fieldPairs) {
         if (!fieldPair.isEmpty()) {
           String[] keyValue = fieldPair.split(EQUAL);
@@ -199,6 +212,16 @@ public class LinePayloadFormatter implements PayloadFormatter {
     } else {
       return false;
     }
+  }
+
+  private String[] splitFieldPairs(String fieldsGroup) {
+
+    if (fieldsGroup == null || fieldsGroup.isEmpty()) return new String[0];
+    Matcher m = Pattern.compile("\\w+=\"[^\"]*\"|\\w+=[^,]*").matcher(fieldsGroup);
+    Stream.Builder<String> builder = Stream.builder();
+
+    while (m.find()) builder.add(m.group());
+    return builder.build().toArray(String[]::new);
   }
 
   private Pair<TSDataType, Object> analyticValue(String value) {

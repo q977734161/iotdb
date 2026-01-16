@@ -23,7 +23,6 @@ import org.apache.tsfile.block.column.Column;
 import org.apache.tsfile.block.column.ColumnBuilder;
 import org.apache.tsfile.enums.TSDataType;
 import org.apache.tsfile.file.metadata.statistics.Statistics;
-import org.apache.tsfile.file.metadata.statistics.TimeStatistics;
 import org.apache.tsfile.read.common.block.column.BinaryColumn;
 import org.apache.tsfile.read.common.block.column.BinaryColumnBuilder;
 import org.apache.tsfile.read.common.block.column.RunLengthEncodedColumn;
@@ -62,14 +61,6 @@ public class LastByAccumulator implements TableAccumulator {
     this.yIsTimeColumn = yIsTimeColumn;
 
     this.xResult = TsPrimitiveType.getByType(xDataType);
-  }
-
-  public boolean xIsTimeColumn() {
-    return xIsTimeColumn;
-  }
-
-  public boolean yIsTimeColumn() {
-    return this.yIsTimeColumn;
   }
 
   public boolean hasInitResult() {
@@ -121,6 +112,7 @@ public class LastByAccumulator implements TableAccumulator {
       case TEXT:
       case STRING:
       case BLOB:
+      case OBJECT:
         addBinaryInput(arguments[0], arguments[1], arguments[2], mask);
         return;
       case BOOLEAN:
@@ -182,6 +174,7 @@ public class LastByAccumulator implements TableAccumulator {
         case TEXT:
         case BLOB:
         case STRING:
+        case OBJECT:
           int length = BytesUtils.bytesToInt(bytes, offset);
           offset += Integer.BYTES;
           Binary binaryVal = new Binary(BytesUtils.subBytes(bytes, offset, length));
@@ -237,6 +230,7 @@ public class LastByAccumulator implements TableAccumulator {
       case TEXT:
       case BLOB:
       case STRING:
+      case OBJECT:
         columnBuilder.writeBinary(xResult.getBinary());
         break;
       case BOOLEAN:
@@ -278,29 +272,25 @@ public class LastByAccumulator implements TableAccumulator {
           yLastTime = yStatistics.getEndTime();
           xIsNull = false;
 
-          if (xStatistics instanceof TimeStatistics) {
-            xResult.setLong(xStatistics.getEndTime());
-            return;
-          }
-
           switch (xDataType) {
             case INT32:
             case DATE:
-              xResult.setInt((int) xStatistics.getLastValue());
+              xResult.setInt(((Number) xStatistics.getLastValue()).intValue());
               break;
             case INT64:
             case TIMESTAMP:
-              xResult.setLong((long) xStatistics.getLastValue());
+              xResult.setLong(((Number) xStatistics.getLastValue()).longValue());
               break;
             case FLOAT:
-              xResult.setFloat((float) statistics[0].getLastValue());
+              xResult.setFloat(((Number) statistics[0].getLastValue()).floatValue());
               break;
             case DOUBLE:
-              xResult.setDouble((double) statistics[0].getLastValue());
+              xResult.setDouble(((Number) statistics[0].getLastValue()).doubleValue());
               break;
             case TEXT:
             case BLOB:
             case STRING:
+            case OBJECT:
               xResult.setBinary((Binary) statistics[0].getLastValue());
               break;
             case BOOLEAN:

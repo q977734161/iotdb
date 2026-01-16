@@ -23,6 +23,7 @@ import org.apache.iotdb.commons.conf.ConfigurationFileUtils;
 import org.apache.iotdb.commons.conf.TrimProperties;
 import org.apache.iotdb.commons.memory.MemoryConfig;
 import org.apache.iotdb.commons.memory.MemoryManager;
+import org.apache.iotdb.db.storageengine.dataregion.compaction.selector.estimator.AbstractCompactionEstimator;
 import org.apache.iotdb.db.utils.MemUtils;
 
 import org.slf4j.Logger;
@@ -30,6 +31,10 @@ import org.slf4j.LoggerFactory;
 
 public class DataNodeMemoryConfig {
   private static final Logger LOGGER = LoggerFactory.getLogger(DataNodeMemoryConfig.class);
+
+  public static final String SCHEMA_CACHE = "SchemaCache";
+  public static final String SCHEMA_REGION = "SchemaRegion";
+  public static final String PARTITION_CACHE = "PartitionCache";
 
   /** Reject proportion for system */
   private double rejectProportion = 0.8;
@@ -59,8 +64,7 @@ public class DataNodeMemoryConfig {
   private int queryThreadCount = Runtime.getRuntime().availableProcessors();
 
   /** Max bytes of each FragmentInstance for DataExchange */
-  private long maxBytesPerFragmentInstance =
-      Runtime.getRuntime().maxMemory() * 3 / 10 * 200 / 1001 / queryThreadCount;
+  private long maxBytesPerFragmentInstance = Runtime.getRuntime().maxMemory() * 3 / 10 * 200 / 1001;
 
   /** The memory manager of on heap */
   private MemoryManager onHeapMemoryManager;
@@ -265,13 +269,13 @@ public class DataNodeMemoryConfig {
 
     schemaRegionMemoryManager =
         schemaEngineMemoryManager.getOrCreateMemoryManager(
-            "SchemaRegion", schemaMemoryTotal * schemaMemoryProportion[0] / proportionSum);
+            SCHEMA_REGION, schemaMemoryTotal * schemaMemoryProportion[0] / proportionSum);
     schemaCacheMemoryManager =
         schemaEngineMemoryManager.getOrCreateMemoryManager(
-            "SchemaCache", schemaMemoryTotal * schemaMemoryProportion[1] / proportionSum);
+            SCHEMA_CACHE, schemaMemoryTotal * schemaMemoryProportion[1] / proportionSum);
     partitionCacheMemoryManager =
         schemaEngineMemoryManager.getOrCreateMemoryManager(
-            "PartitionCache", schemaMemoryTotal * schemaMemoryProportion[2] / proportionSum);
+            PARTITION_CACHE, schemaMemoryTotal * schemaMemoryProportion[2] / proportionSum);
 
     LOGGER.info(
         "allocateMemoryForSchemaRegion = {}",
@@ -367,8 +371,7 @@ public class DataNodeMemoryConfig {
     }
     writeMemoryManager =
         storageEngineMemoryManager.getOrCreateMemoryManager("Write", writeMemorySize);
-    compactionMemoryManager =
-        storageEngineMemoryManager.getOrCreateMemoryManager("Compaction", compactionMemorySize);
+    initCompactionMemoryManager(compactionMemorySize);
     memtableMemoryManager =
         writeMemoryManager.getOrCreateMemoryManager("Memtable", memtableMemorySize);
     timePartitionInfoMemoryManager =
@@ -385,6 +388,14 @@ public class DataNodeMemoryConfig {
     long walBufferQueueMemorySize = (long) (memtableMemorySize * getWalBufferQueueProportion());
     walBufferQueueMemoryManager =
         memtableMemoryManager.getOrCreateMemoryManager("WalBufferQueue", walBufferQueueMemorySize);
+  }
+
+  private void initCompactionMemoryManager(long compactionMemorySize) {
+    long fixedMemoryCost =
+        AbstractCompactionEstimator.allocateMemoryCostForFileInfoCache(compactionMemorySize);
+    compactionMemoryManager =
+        storageEngineMemoryManager.getOrCreateMemoryManager(
+            "Compaction", compactionMemorySize - fixedMemoryCost);
   }
 
   @SuppressWarnings("squid:S3518")
@@ -465,9 +476,7 @@ public class DataNodeMemoryConfig {
     // metadata cache is disabled, we need to move all their allocated memory to other parts
     if (!isMetaDataCacheEnable()) {
       long sum =
-          bloomFilterCacheMemoryManager.getTotalMemorySizeInBytes()
-              + chunkCacheMemoryManager.getTotalMemorySizeInBytes()
-              + timeSeriesMetaDataCacheMemoryManager.getTotalMemorySizeInBytes();
+          bloomFilterCacheMemorySize + chunkCacheMemorySize + timeSeriesMetaDataCacheMemorySize;
       bloomFilterCacheMemorySize = 0;
       chunkCacheMemorySize = 0;
       timeSeriesMetaDataCacheMemorySize = 0;
@@ -477,7 +486,7 @@ public class DataNodeMemoryConfig {
       operatorsMemorySize += partForOperators;
     }
     // set max bytes per fragment instance
-    setMaxBytesPerFragmentInstance(dataExchangeMemorySize / getQueryThreadCount());
+    setMaxBytesPerFragmentInstance(dataExchangeMemorySize);
 
     bloomFilterCacheMemoryManager =
         queryEngineMemoryManager.getOrCreateMemoryManager(

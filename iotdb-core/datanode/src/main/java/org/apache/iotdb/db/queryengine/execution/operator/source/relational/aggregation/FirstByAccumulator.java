@@ -23,7 +23,6 @@ import org.apache.tsfile.block.column.Column;
 import org.apache.tsfile.block.column.ColumnBuilder;
 import org.apache.tsfile.enums.TSDataType;
 import org.apache.tsfile.file.metadata.statistics.Statistics;
-import org.apache.tsfile.file.metadata.statistics.TimeStatistics;
 import org.apache.tsfile.read.common.block.column.BinaryColumn;
 import org.apache.tsfile.read.common.block.column.BinaryColumnBuilder;
 import org.apache.tsfile.read.common.block.column.RunLengthEncodedColumn;
@@ -33,6 +32,8 @@ import org.apache.tsfile.utils.RamUsageEstimator;
 import org.apache.tsfile.utils.TsPrimitiveType;
 import org.apache.tsfile.write.UnSupportedDataTypeException;
 
+import java.nio.charset.StandardCharsets;
+
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.apache.iotdb.db.queryengine.execution.operator.source.relational.aggregation.Utils.serializeTimeValue;
 
@@ -41,11 +42,11 @@ public class FirstByAccumulator implements TableAccumulator {
   private static final long INSTANCE_SIZE =
       RamUsageEstimator.shallowSizeOfInstance(FirstByAccumulator.class);
 
-  private final TSDataType xDataType;
-  private final TSDataType yDataType;
+  protected final TSDataType xDataType;
+  protected final TSDataType yDataType;
 
-  private final boolean xIsTimeColumn;
-  private final boolean yIsTimeColumn;
+  protected final boolean xIsTimeColumn;
+  protected final boolean yIsTimeColumn;
 
   private long yFirstTime = Long.MAX_VALUE;
 
@@ -54,14 +55,21 @@ public class FirstByAccumulator implements TableAccumulator {
 
   private boolean initResult = false;
 
+  private final boolean canFinishAfterInit;
+
   public FirstByAccumulator(
-      TSDataType xDataType, TSDataType yDataType, boolean xIsTimeColumn, boolean yIsTimeColumn) {
+      TSDataType xDataType,
+      TSDataType yDataType,
+      boolean xIsTimeColumn,
+      boolean yIsTimeColumn,
+      boolean canFinishAfterInit) {
     this.xDataType = xDataType;
     this.yDataType = yDataType;
     this.xIsTimeColumn = xIsTimeColumn;
     this.yIsTimeColumn = yIsTimeColumn;
 
     this.xResult = TsPrimitiveType.getByType(xDataType);
+    this.canFinishAfterInit = canFinishAfterInit;
   }
 
   @Override
@@ -71,7 +79,8 @@ public class FirstByAccumulator implements TableAccumulator {
 
   @Override
   public TableAccumulator copy() {
-    return new FirstByAccumulator(xDataType, yDataType, xIsTimeColumn, yIsTimeColumn);
+    return new FirstByAccumulator(
+        xDataType, yDataType, xIsTimeColumn, yIsTimeColumn, canFinishAfterInit);
   }
 
   @Override
@@ -97,6 +106,7 @@ public class FirstByAccumulator implements TableAccumulator {
       case TEXT:
       case STRING:
       case BLOB:
+      case OBJECT:
         addBinaryInput(arguments[0], arguments[1], arguments[2], mask);
         return;
       case BOOLEAN:
@@ -157,6 +167,7 @@ public class FirstByAccumulator implements TableAccumulator {
           break;
         case TEXT:
         case BLOB:
+        case OBJECT:
         case STRING:
           int length = BytesUtils.bytesToInt(bytes, offset);
           offset += Integer.BYTES;
@@ -212,6 +223,7 @@ public class FirstByAccumulator implements TableAccumulator {
         break;
       case TEXT:
       case BLOB:
+      case OBJECT:
       case STRING:
         columnBuilder.writeBinary(xResult.getBinary());
         break;
@@ -226,7 +238,7 @@ public class FirstByAccumulator implements TableAccumulator {
 
   @Override
   public boolean hasFinalResult() {
-    return initResult;
+    return canFinishAfterInit && initResult;
   }
 
   @Override
@@ -254,30 +266,32 @@ public class FirstByAccumulator implements TableAccumulator {
           yFirstTime = yStatistics.getStartTime();
           xIsNull = false;
 
-          if (xStatistics instanceof TimeStatistics) {
-            xResult.setLong(xStatistics.getStartTime());
-            return;
-          }
-
           switch (xDataType) {
             case INT32:
             case DATE:
-              xResult.setInt((int) xStatistics.getFirstValue());
+              xResult.setInt(((Number) xStatistics.getFirstValue()).intValue());
               break;
             case INT64:
             case TIMESTAMP:
-              xResult.setLong((long) xStatistics.getFirstValue());
+              xResult.setLong(((Number) xStatistics.getFirstValue()).longValue());
               break;
             case FLOAT:
-              xResult.setFloat((float) statistics[0].getFirstValue());
+              xResult.setFloat(((Number) statistics[0].getFirstValue()).floatValue());
               break;
             case DOUBLE:
-              xResult.setDouble((double) statistics[0].getFirstValue());
+              xResult.setDouble(((Number) statistics[0].getFirstValue()).doubleValue());
               break;
             case TEXT:
             case BLOB:
+            case OBJECT:
             case STRING:
-              xResult.setBinary((Binary) statistics[0].getFirstValue());
+              if (statistics[0].getFirstValue() instanceof Binary) {
+                xResult.setBinary((Binary) statistics[0].getFirstValue());
+              } else {
+                xResult.setBinary(
+                    new Binary(
+                        String.valueOf(statistics[0].getFirstValue()), StandardCharsets.UTF_8));
+              }
               break;
             case BOOLEAN:
               xResult.setBoolean((boolean) statistics[0].getFirstValue());
@@ -315,7 +329,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateIntFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -325,7 +341,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateIntFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
@@ -361,7 +379,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateLongFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -371,7 +391,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateLongFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
@@ -407,7 +429,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateFloatFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -417,7 +441,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateFloatFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
@@ -453,7 +479,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateDoubleFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -463,7 +491,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateDoubleFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
@@ -499,7 +529,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateBinaryFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -509,7 +541,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateBinaryFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
@@ -545,7 +579,9 @@ public class FirstByAccumulator implements TableAccumulator {
       for (int i = 0; i < positionCount; i++) {
         if (!yColumn.isNull(i)) {
           updateBooleanFirstValue(xColumn, i, timeColumn.getLong(i));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     } else {
@@ -555,7 +591,9 @@ public class FirstByAccumulator implements TableAccumulator {
         position = selectedPositions[i];
         if (!yColumn.isNull(position)) {
           updateBooleanFirstValue(xColumn, position, timeColumn.getLong(position));
-          return;
+          if (canFinishAfterInit) {
+            return;
+          }
         }
       }
     }
